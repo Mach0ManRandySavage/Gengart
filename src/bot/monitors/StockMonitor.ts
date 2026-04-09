@@ -27,6 +27,30 @@ function isBrowserCrash(err: Error): boolean {
   return BROWSER_CRASH_MSGS.some(m => err.message.includes(m));
 }
 
+/**
+ * Normalise any proxy string to the URL format Playwright expects.
+ * Accepts:
+ *   IP:PORT:USER:PASS       → http://USER:PASS@IP:PORT
+ *   IP:PORT                 → http://IP:PORT
+ *   http(s)://...           → returned as-is
+ *   socks5://...            → returned as-is
+ */
+function normaliseProxy(raw: string): string {
+  if (!raw) return raw;
+  if (/^https?:\/\//i.test(raw) || /^socks5?:\/\//i.test(raw)) return raw;
+
+  const parts = raw.split(':');
+  if (parts.length === 4) {
+    const [host, port, user, pass] = parts;
+    return `http://${user}:${pass}@${host}:${port}`;
+  }
+  if (parts.length === 2) {
+    return `http://${raw}`;
+  }
+  // Unknown format — pass through and let Playwright error
+  return raw;
+}
+
 export class StockMonitor {
   private task:      Task;
   private profile:   Profile;
@@ -71,8 +95,9 @@ export class StockMonitor {
     };
 
     if (this.task.proxy) {
-      launchOptions.proxy = { server: this.task.proxy };
-      this.callbacks.onLog('info', `Using proxy: ${this.task.proxy.replace(/:([^:@]+)@/, ':***@')}`);
+      const proxyUrl = normaliseProxy(this.task.proxy);
+      launchOptions.proxy = { server: proxyUrl };
+      this.callbacks.onLog('info', `Using proxy: ${proxyUrl.replace(/:([^:@]+)@/, ':***@')}`);
     }
 
     this.browser = await chromium.launch(launchOptions);
