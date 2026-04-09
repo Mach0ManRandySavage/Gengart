@@ -26,31 +26,35 @@ export enum LogLevel {
 // ─── Task ─────────────────────────────────────────────────────────────────────
 
 export interface Task {
-  id:           number;
-  group_id:     number | null;
-  retailer:     Retailer;
-  product_url:  string | null;
-  keywords:     string | null;
-  size:         string | null;
-  quantity:     number;
-  profile_id:   number | null;
-  proxy:        string | null;
-  status:       TaskStatus;
-  poll_interval: number; // ms
-  created_at:   number;
-  updated_at:   number;
+  id:              number;
+  group_id:        number | null;
+  retailer:        Retailer;
+  product_url:     string | null;
+  keywords:        string | null;
+  size:            string | null;
+  quantity:        number;
+  profile_id:      number | null;
+  proxy:           string | null;
+  status:          TaskStatus;
+  poll_interval:   number; // ms
+  offer_id:        string | null; // Walmart OID — targets specific seller listing
+  skip_monitoring: boolean;       // skip stock check, go straight to ATC
+  created_at:      number;
+  updated_at:      number;
 }
 
 export interface CreateTaskInput {
-  group_id?:    number | null;
-  retailer:     Retailer;
-  product_url?: string;
-  keywords?:    string;
-  size?:        string;
-  quantity?:    number;
-  profile_id?:  number | null;
-  proxy?:       string;
-  poll_interval?: number;
+  group_id?:        number | null;
+  retailer:         Retailer;
+  product_url?:     string;
+  keywords?:        string;
+  size?:            string;
+  quantity?:        number;
+  profile_id?:      number | null;
+  proxy?:           string;
+  poll_interval?:   number;
+  offer_id?:        string;
+  skip_monitoring?: boolean;
 }
 
 // ─── Task Group ───────────────────────────────────────────────────────────────

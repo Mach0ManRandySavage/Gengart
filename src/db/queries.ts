@@ -20,20 +20,24 @@ export function dbCreateTask(db: Database.Database, input: CreateTaskInput): Tas
   const now = Date.now();
   const info = db.prepare(`
     INSERT INTO tasks
-      (group_id, retailer, product_url, keywords, size, quantity, profile_id, proxy, poll_interval, status, created_at, updated_at)
+      (group_id, retailer, product_url, keywords, size, quantity, profile_id, proxy,
+       poll_interval, offer_id, skip_monitoring, status, created_at, updated_at)
     VALUES
-      (@group_id, @retailer, @product_url, @keywords, @size, @quantity, @profile_id, @proxy, @poll_interval, @status, @now, @now)
+      (@group_id, @retailer, @product_url, @keywords, @size, @quantity, @profile_id, @proxy,
+       @poll_interval, @offer_id, @skip_monitoring, @status, @now, @now)
   `).run({
-    group_id:      input.group_id     ?? null,
-    retailer:      input.retailer,
-    product_url:   input.product_url  ?? null,
-    keywords:      input.keywords     ?? null,
-    size:          input.size         ?? null,
-    quantity:      input.quantity     ?? 1,
-    profile_id:    input.profile_id   ?? null,
-    proxy:         input.proxy        ?? null,
-    poll_interval: input.poll_interval ?? 3000,
-    status:        TaskStatus.Idle,
+    group_id:        input.group_id       ?? null,
+    retailer:        input.retailer,
+    product_url:     input.product_url    ?? null,
+    keywords:        input.keywords       ?? null,
+    size:            input.size           ?? null,
+    quantity:        input.quantity       ?? 1,
+    profile_id:      input.profile_id     ?? null,
+    proxy:           input.proxy          ?? null,
+    poll_interval:   input.poll_interval  ?? 3000,
+    offer_id:        input.offer_id       ?? null,
+    skip_monitoring: input.skip_monitoring ? 1 : 0,
+    status:          TaskStatus.Idle,
     now,
   });
   return dbGetTask(db, info.lastInsertRowid as number)!;
@@ -48,16 +52,22 @@ export function dbUpdateTask(db: Database.Database, id: number, input: Partial<C
     UPDATE tasks SET
       group_id      = @group_id,
       retailer      = @retailer,
-      product_url   = @product_url,
-      keywords      = @keywords,
-      size          = @size,
-      quantity      = @quantity,
-      profile_id    = @profile_id,
-      proxy         = @proxy,
-      poll_interval = @poll_interval,
-      updated_at    = @updated_at
+      product_url      = @product_url,
+      keywords         = @keywords,
+      size             = @size,
+      quantity         = @quantity,
+      profile_id       = @profile_id,
+      proxy            = @proxy,
+      poll_interval    = @poll_interval,
+      offer_id         = @offer_id,
+      skip_monitoring  = @skip_monitoring,
+      updated_at       = @updated_at
     WHERE id = @id
-  `).run({ ...merged, id });
+  `).run({
+    ...merged,
+    id,
+    skip_monitoring: merged.skip_monitoring ? 1 : 0,
+  });
 
   return dbGetTask(db, id)!;
 }

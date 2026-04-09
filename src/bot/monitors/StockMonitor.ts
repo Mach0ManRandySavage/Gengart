@@ -2,7 +2,7 @@ import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import type { Task, Profile } from '../../types';
 import { TaskStatus, Retailer } from '../../types';
 import { applyStealth, randomUserAgent, randomViewport, sleep } from '../stealth/stealth';
-import { WalmartCheckout }  from '../checkout/walmart';
+import { WalmartCheckout, extractWalmartSku }  from '../checkout/walmart';
 import { TargetCheckout }   from '../checkout/target';
 import { AmazonCheckout }   from '../checkout/amazon';
 import { BestBuyCheckout }  from '../checkout/bestbuy';
@@ -150,13 +150,30 @@ export class StockMonitor {
   // ── Poll loop ────────────────────────────────────────────────────────────
 
   private async pollLoop(): Promise<void> {
-    const url = this.task.product_url;
-    if (!url) {
+    if (!this.task.product_url) {
       this.callbacks.onFail('No product URL configured');
       return;
     }
 
+    // For Walmart, always canonicalise to /ip/{sku} — cleaner and avoids
+    // tracking params that can cause 403s on headless requests.
+    let pollUrl = this.task.product_url;
+    if (this.task.retailer === Retailer.Walmart) {
+      const sku = extractWalmartSku(this.task.product_url);
+      pollUrl = `https://www.walmart.com/ip/${sku}`;
+      this.callbacks.onLog('info', `Polling SKU ${sku} → ${pollUrl}`);
+    }
+
+    // Skip Monitoring: go straight to checkout without polling
+    if (this.task.skip_monitoring) {
+      this.callbacks.onLog('info', 'Skip Monitoring ON — going straight to checkout');
+      this.callbacks.onStatusChange(TaskStatus.CheckingOut);
+      await this.runCheckout();
+      return;
+    }
+
     while (this.running) {
+      const url = pollUrl;
       // Relaunch if browser died
       if (!this.isBrowserAlive()) {
         this.callbacks.onLog('warn', 'Browser not alive — relaunching…');
@@ -185,7 +202,6 @@ export class StockMonitor {
         if (isBrowserCrash(e)) {
           this.callbacks.onLog('warn', `Browser crashed: ${e.message} — will relaunch`);
           await this.closeBrowser();
-          // relaunch happens at top of next loop iteration
         } else {
           this.callbacks.onLog('warn', `Poll error: ${e.message}`);
         }

@@ -20,15 +20,17 @@ const RETAILERS = [
 
 export function TaskModal({ task, groups, profiles, onClose, onSave }: TaskModalProps) {
   const [form, setForm] = useState<CreateTaskInput>({
-    retailer:      Retailer.Walmart,
-    product_url:   '',
-    keywords:      '',
-    size:          '',
-    quantity:      1,
-    profile_id:    null,
-    group_id:      null,
-    proxy:         '',
-    poll_interval: 3000,
+    retailer:        Retailer.Walmart,
+    product_url:     '',
+    keywords:        '',
+    size:            '',
+    quantity:        1,
+    profile_id:      null,
+    group_id:        null,
+    proxy:           '',
+    poll_interval:   3000,
+    offer_id:        '',
+    skip_monitoring: false,
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
@@ -36,15 +38,17 @@ export function TaskModal({ task, groups, profiles, onClose, onSave }: TaskModal
   useEffect(() => {
     if (task) {
       setForm({
-        retailer:      task.retailer,
-        product_url:   task.product_url  ?? '',
-        keywords:      task.keywords     ?? '',
-        size:          task.size         ?? '',
-        quantity:      task.quantity,
-        profile_id:    task.profile_id,
-        group_id:      task.group_id,
-        proxy:         task.proxy        ?? '',
-        poll_interval: task.poll_interval,
+        retailer:        task.retailer,
+        product_url:     task.product_url  ?? '',
+        keywords:        task.keywords     ?? '',
+        size:            task.size         ?? '',
+        quantity:        task.quantity,
+        profile_id:      task.profile_id,
+        group_id:        task.group_id,
+        proxy:           task.proxy        ?? '',
+        poll_interval:   task.poll_interval,
+        offer_id:        task.offer_id     ?? '',
+        skip_monitoring: task.skip_monitoring ?? false,
       });
     }
   }, [task]);
@@ -149,6 +153,30 @@ export function TaskModal({ task, groups, profiles, onClose, onSave }: TaskModal
             <input className="input" type="number" min={1000} step={500} value={form.poll_interval}
               onChange={e => set('poll_interval', Math.max(1000, parseInt(e.target.value) || 3000))} />
           </div>
+
+          {/* Walmart-specific fields */}
+          {form.retailer === 'walmart' && (
+            <div className="border border-dark-700 rounded-lg p-3 space-y-3">
+              <p className="text-xs font-semibold text-dark-400 uppercase tracking-widest">Walmart Options</p>
+
+              <div>
+                <label className="label">Offer ID (OID) <span className="text-dark-600 normal-case font-normal">— optional, for specific seller</span></label>
+                <input className="input" placeholder="e.g. 4B0A3BCC2..." value={form.offer_id ?? ''}
+                  onChange={e => set('offer_id', e.target.value)} />
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" className="rounded" checked={form.skip_monitoring ?? false}
+                  onChange={e => set('skip_monitoring', e.target.checked)} />
+                <span className="text-sm text-dark-300">Skip Monitoring — go straight to ATC</span>
+              </label>
+              {form.skip_monitoring && (
+                <p className="text-xs text-yellow-400">
+                  Enable this right when the drop begins. Requires Offer ID to target a specific listing.
+                </p>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
