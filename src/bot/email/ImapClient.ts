@@ -77,7 +77,7 @@ export class ImapClient {
         const from = mail.from?.text ?? '';
         if (!from.toLowerCase().includes(fromPattern.toLowerCase())) continue;
 
-        const otp = this.extractOtp(mail.text ?? mail.html ?? '');
+        const otp = this.extractOtp(mail.text || (mail.html || ''));
         if (otp) {
           await this.markSeen(uid);
           return { code: otp, from, subject: mail.subject ?? '' };
