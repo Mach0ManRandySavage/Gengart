@@ -14,6 +14,19 @@ export interface MonitorCallbacks {
   onFail:         (error: string) => void;
 }
 
+const BROWSER_CRASH_MSGS = [
+  'Target closed',
+  'Target page, context or browser has been closed',
+  'browser has been closed',
+  'context or browser',
+  'Connection closed',
+  'Protocol error',
+];
+
+function isBrowserCrash(err: Error): boolean {
+  return BROWSER_CRASH_MSGS.some(m => err.message.includes(m));
+}
+
 export class StockMonitor {
   private task:      Task;
   private profile:   Profile;
@@ -30,19 +43,36 @@ export class StockMonitor {
 
   async start(): Promise<void> {
     this.running = true;
+    await this.launchBrowser();
+    await this.pollLoop();
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+    await this.closeBrowser();
+  }
+
+  // ── Browser lifecycle ────────────────────────────────────────────────────
+
+  private async launchBrowser(): Promise<void> {
+    await this.closeBrowser(); // close any existing instance first
 
     const launchOptions: Parameters<typeof chromium.launch>[0] = {
       headless: true,
       args: [
         '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
         '--disable-blink-features=AutomationControlled',
-        '--disable-features=IsolateOrigins',
+        '--disable-features=IsolateOrigins,site-per-process',
         '--disable-site-isolation-trials',
+        '--disable-gpu',
       ],
     };
 
     if (this.task.proxy) {
       launchOptions.proxy = { server: this.task.proxy };
+      this.callbacks.onLog('info', `Using proxy: ${this.task.proxy.replace(/:([^:@]+)@/, ':***@')}`);
     }
 
     this.browser = await chromium.launch(launchOptions);
@@ -51,31 +81,33 @@ export class StockMonitor {
     const viewport = randomViewport();
 
     this.context = await this.browser.newContext({
-      userAgent:       ua,
+      userAgent:         ua,
       viewport,
-      locale:          'en-US',
-      timezoneId:      'America/New_York',
+      locale:            'en-US',
+      timezoneId:        'America/New_York',
       deviceScaleFactor: 1,
-      hasTouch:        false,
+      hasTouch:          false,
       javaScriptEnabled: true,
-      acceptDownloads: false,
+      acceptDownloads:   false,
+      ignoreHTTPSErrors: true,
     });
 
     await applyStealth(this.context);
-
     this.callbacks.onLog('info', `Browser launched | UA: ${ua.slice(0, 60)}…`);
-
-    await this.pollLoop();
   }
 
-  async stop(): Promise<void> {
-    this.running = false;
-    try {
-      await this.browser?.close();
-    } catch { /* ignore */ }
-    this.browser  = null;
-    this.context  = null;
+  private async closeBrowser(): Promise<void> {
+    try { await this.context?.close(); } catch { /* ignore */ }
+    try { await this.browser?.close();  } catch { /* ignore */ }
+    this.context = null;
+    this.browser = null;
   }
+
+  private isBrowserAlive(): boolean {
+    return !!(this.browser?.isConnected() && this.context);
+  }
+
+  // ── Poll loop ────────────────────────────────────────────────────────────
 
   private async pollLoop(): Promise<void> {
     const url = this.task.product_url;
@@ -85,6 +117,18 @@ export class StockMonitor {
     }
 
     while (this.running) {
+      // Relaunch if browser died
+      if (!this.isBrowserAlive()) {
+        this.callbacks.onLog('warn', 'Browser not alive — relaunching…');
+        try {
+          await this.launchBrowser();
+        } catch (err) {
+          this.callbacks.onLog('error', `Relaunch failed: ${(err as Error).message}`);
+          await sleep(5000);
+          continue;
+        }
+      }
+
       try {
         const inStock = await this.checkStock(url);
 
@@ -92,52 +136,51 @@ export class StockMonitor {
           this.callbacks.onStatusChange(TaskStatus.CheckingOut);
           this.callbacks.onLog('info', 'Stock detected — initiating checkout');
           await this.runCheckout();
-          return; // done
+          return;
         } else {
           this.callbacks.onLog('info', `Out of stock — retrying in ${this.task.poll_interval}ms`);
         }
       } catch (err) {
-        this.callbacks.onLog('warn', `Poll error: ${(err as Error).message}`);
+        const e = err as Error;
+        if (isBrowserCrash(e)) {
+          this.callbacks.onLog('warn', `Browser crashed: ${e.message} — will relaunch`);
+          await this.closeBrowser();
+          // relaunch happens at top of next loop iteration
+        } else {
+          this.callbacks.onLog('warn', `Poll error: ${e.message}`);
+        }
       }
 
       await sleep(this.task.poll_interval + Math.random() * 1000);
     }
   }
 
+  // ── Stock checks ─────────────────────────────────────────────────────────
+
   private async checkStock(url: string): Promise<boolean> {
     const page = await this.context!.newPage();
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-      const retailer = this.task.retailer;
-      let inStock = false;
-
-      if (retailer === Retailer.Walmart) {
-        inStock = await this.checkWalmartStock(page);
-      } else if (retailer === Retailer.Target) {
-        inStock = await this.checkTargetStock(page);
-      } else if (retailer === Retailer.Amazon) {
-        inStock = await this.checkAmazonStock(page);
-      } else if (retailer === Retailer.BestBuy) {
-        inStock = await this.checkBestBuyStock(page);
+      switch (this.task.retailer) {
+        case Retailer.Walmart: return await this.checkWalmartStock(page);
+        case Retailer.Target:  return await this.checkTargetStock(page);
+        case Retailer.Amazon:  return await this.checkAmazonStock(page);
+        case Retailer.BestBuy: return await this.checkBestBuyStock(page);
+        default: return false;
       }
-
-      return inStock;
     } finally {
       await page.close().catch(() => {});
     }
   }
 
-  // ── Retailer stock-check helpers ────────────────────────────────────────
-
   private async checkWalmartStock(page: Page): Promise<boolean> {
     try {
-      // Walmart: ATC button is disabled or absent when out-of-stock
       const atcBtn = page.locator('[data-automation-id="add-to-cart-btn"], button:has-text("Add to cart")').first();
       await atcBtn.waitFor({ state: 'visible', timeout: 8000 });
       const disabled = await atcBtn.getAttribute('disabled');
       const text = (await atcBtn.textContent() ?? '').toLowerCase();
-      return disabled === null && (text.includes('add to cart') || text.includes('add to Cart'));
+      return disabled === null && text.includes('add to cart');
     } catch {
       return false;
     }
@@ -161,7 +204,6 @@ export class StockMonitor {
       const text = (await buyBox.textContent() ?? '').toLowerCase();
       if (text.includes('in stock')) return true;
 
-      // Check ATC button as fallback
       const atcBtn = page.locator('#add-to-cart-button').first();
       const disabled = await atcBtn.getAttribute('disabled').catch(() => 'disabled');
       return disabled === null;
@@ -182,7 +224,7 @@ export class StockMonitor {
     }
   }
 
-  // ── Run checkout ─────────────────────────────────────────────────────────
+  // ── Checkout ─────────────────────────────────────────────────────────────
 
   private async runCheckout(): Promise<void> {
     const page = await this.context!.newPage();
