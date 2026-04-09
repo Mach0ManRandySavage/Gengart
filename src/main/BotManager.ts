@@ -2,7 +2,7 @@ import { BrowserWindow, Notification } from 'electron';
 import type { Database } from 'better-sqlite3';
 import type { Task, Profile } from '../types';
 import { TaskStatus } from '../types';
-import { dbGetTask, dbGetProfile, dbUpdateTaskStatus, dbInsertLog, dbGetTasksByGroup } from '../db/queries';
+import { dbGetTask, dbGetProfile, dbUpdateTaskStatus, dbInsertLog, dbGetTasksByGroup, dbGetSettings } from '../db/queries';
 import { StockMonitor } from '../bot/monitors/StockMonitor';
 
 export class BotManager {
@@ -48,12 +48,14 @@ export class BotManager {
     this.setStatus(taskId, TaskStatus.Monitoring);
     this.log(taskId, 'info', `Starting monitor for ${task.retailer} — ${task.product_url ?? task.keywords}`);
 
+    const settings = dbGetSettings(this.db);
+
     const monitor = new StockMonitor(task, profile, {
       onStatusChange: (status) => this.setStatus(taskId, status),
       onLog: (level, msg) => this.log(taskId, level, msg),
       onSuccess: () => this.notifySuccess(task),
       onFail:    (err) => this.notifyFail(task, err),
-    });
+    }, { headless: settings.browser_headless });
 
     this.monitors.set(taskId, monitor);
 

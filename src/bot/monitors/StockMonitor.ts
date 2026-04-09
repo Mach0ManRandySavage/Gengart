@@ -51,18 +51,24 @@ function normaliseProxy(raw: string): string {
   return raw;
 }
 
+export interface MonitorOptions {
+  headless: boolean;
+}
+
 export class StockMonitor {
   private task:      Task;
   private profile:   Profile;
   private callbacks: MonitorCallbacks;
+  private options:   MonitorOptions;
   private browser:   Browser | null = null;
   private context:   BrowserContext | null = null;
   private running    = false;
 
-  constructor(task: Task, profile: Profile, callbacks: MonitorCallbacks) {
+  constructor(task: Task, profile: Profile, callbacks: MonitorCallbacks, options: MonitorOptions = { headless: true }) {
     this.task      = task;
     this.profile   = profile;
     this.callbacks = callbacks;
+    this.options   = options;
   }
 
   async start(): Promise<void> {
@@ -82,7 +88,10 @@ export class StockMonitor {
     await this.closeBrowser(); // close any existing instance first
 
     const launchOptions: Parameters<typeof chromium.launch>[0] = {
-      headless: true,
+      headless: this.options.headless,
+      // Prefer the user's real Chrome installation — it passes bot detection
+      // far better than bundled Chromium. Falls back to Chromium if not found.
+      channel: 'chrome',
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -90,17 +99,23 @@ export class StockMonitor {
         '--disable-blink-features=AutomationControlled',
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-site-isolation-trials',
-        '--disable-gpu',
       ],
     };
 
-    if (this.task.proxy) {
-      const proxyUrl = normaliseProxy(this.task.proxy);
-      launchOptions.proxy = { server: proxyUrl };
-      this.callbacks.onLog('info', `Using proxy: ${proxyUrl.replace(/:([^:@]+)@/, ':***@')}`);
+    // channel: 'chrome' may fail if Chrome isn't installed — fall back silently
+    try {
+      if (this.task.proxy) {
+        const proxyUrl = normaliseProxy(this.task.proxy);
+        launchOptions.proxy = { server: proxyUrl };
+        this.callbacks.onLog('info', `Using proxy: ${proxyUrl.replace(/:([^:@]+)@/, ':***@')}`);
+      }
+      this.browser = await chromium.launch(launchOptions);
+      this.callbacks.onLog('info', 'Using installed Chrome');
+    } catch {
+      this.callbacks.onLog('warn', 'Chrome not found — falling back to bundled Chromium');
+      delete launchOptions.channel;
+      this.browser = await chromium.launch(launchOptions);
     }
-
-    this.browser = await chromium.launch(launchOptions);
 
     const ua       = randomUserAgent();
     const viewport = randomViewport();
