@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+.DS_Store
+*.log
+.env
+.env.local
+
+# Playwright browsers (large binaries)
+node_modules/playwright/.local-browsers/
+
+# SQLite DB files (contain user data)
+*.db
+*.sqlite
