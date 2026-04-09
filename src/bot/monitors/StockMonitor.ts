@@ -160,7 +160,12 @@ export class StockMonitor {
   private async checkStock(url: string): Promise<boolean> {
     const page = await this.context!.newPage();
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      // 'load' waits for all resources; then we additionally wait for
+      // network to go quiet so JS-rendered content (React, etc.) is painted.
+      await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {
+        // networkidle may not settle on heavy pages — that's fine, continue
+      });
 
       switch (this.task.retailer) {
         case Retailer.Walmart: return await this.checkWalmartStock(page);
@@ -176,12 +181,45 @@ export class StockMonitor {
 
   private async checkWalmartStock(page: Page): Promise<boolean> {
     try {
-      const atcBtn = page.locator('[data-automation-id="add-to-cart-btn"], button:has-text("Add to cart")').first();
-      await atcBtn.waitFor({ state: 'visible', timeout: 8000 });
-      const disabled = await atcBtn.getAttribute('disabled');
-      const text = (await atcBtn.textContent() ?? '').toLowerCase();
-      return disabled === null && text.includes('add to cart');
-    } catch {
+      // Evaluate in-page JS for maximum flexibility — avoids brittle CSS selectors
+      const result = await page.evaluate(() => {
+        // 1. Explicit out-of-stock copy anywhere on the page
+        const bodyText = document.body.innerText.toLowerCase();
+        if (
+          bodyText.includes('out of stock') ||
+          bodyText.includes('currently unavailable') ||
+          bodyText.includes('not available')
+        ) return { inStock: false, reason: 'oos-text' };
+
+        // 2. Find any enabled "Add to cart" button
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const atcBtn = buttons.find(btn => {
+          const text = (btn.textContent ?? '').toLowerCase().trim();
+          return (
+            (text.includes('add to cart') || text === 'add to cart') &&
+            !(btn as HTMLButtonElement).disabled &&
+            !btn.getAttribute('aria-disabled')
+          );
+        });
+        if (atcBtn) return { inStock: true, reason: 'atc-button' };
+
+        // 3. data-automation-id variants Walmart has used over time
+        const autoIds = [
+          'add-to-cart-btn', 'atc-button', 'add-to-cart-button',
+          'product-atc-button', 'fulfillment-add-to-cart-button',
+        ];
+        for (const id of autoIds) {
+          const el = document.querySelector(`[data-automation-id="${id}"]`) as HTMLButtonElement | null;
+          if (el && !el.disabled) return { inStock: true, reason: id };
+        }
+
+        return { inStock: false, reason: 'no-atc-found' };
+      });
+
+      this.callbacks.onLog('info', `Walmart check: ${result.inStock ? 'IN STOCK' : 'out of stock'} (${result.reason})`);
+      return result.inStock;
+    } catch (err) {
+      this.callbacks.onLog('warn', `Walmart check error: ${(err as Error).message}`);
       return false;
     }
   }
