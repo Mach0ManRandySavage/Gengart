@@ -189,10 +189,33 @@ export class WalmartCheckout extends BaseCheckout {
 
     await this.checkForPxBlock();
 
-    const checkoutBtn = '[data-automation-id="checkout-btn"], button:has-text("Check out"), a:has-text("Check out")';
-    await this.waitFor(checkoutBtn, 15_000);
-    await this.click(checkoutBtn);
-    this.log('info', 'Clicked checkout');
+    // Find checkout button via evaluate — Walmart changes automation IDs frequently
+    const clicked = await this.page.evaluate(() => {
+      const autoIds = ['checkout-btn', 'proceed-to-checkout', 'cart-checkout-button'];
+      for (const id of autoIds) {
+        const el = document.querySelector(`[data-automation-id="${id}"]`) as HTMLButtonElement | null;
+        if (el && !el.disabled) { el.click(); return id; }
+      }
+      // Fall back to any button/link whose text contains "checkout"
+      const all = Array.from(document.querySelectorAll('button, a'));
+      const btn = all.find(el => {
+        const text = (el.textContent ?? '').toLowerCase().trim();
+        return text.includes('check out') || text === 'checkout';
+      }) as HTMLButtonElement | HTMLAnchorElement | undefined;
+      if (btn) { (btn as HTMLElement).click(); return 'text-match'; }
+      return null;
+    });
+
+    if (!clicked) {
+      // Last resort: log page HTML snippet and throw
+      const html = await this.page.evaluate(() =>
+        document.body.innerHTML.slice(0, 3000)
+      ).catch(() => '');
+      this.log('warn', `Cart page snippet: ${html}`);
+      throw new Error('Checkout button not found on cart page');
+    }
+
+    this.log('info', `Clicked checkout (${clicked})`);
 
     await this.page.waitForURL('**/checkout**', { timeout: 20_000 });
     await sleep(1000);
