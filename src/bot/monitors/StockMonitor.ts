@@ -230,6 +230,7 @@ export class StockMonitor {
 
         // 3. data-automation-id variants Walmart has used over time
         const autoIds = [
+          'atc',                           // current (2024-2025)
           'add-to-cart-btn', 'atc-button', 'add-to-cart-button',
           'product-atc-button', 'fulfillment-add-to-cart-button',
         ];
@@ -238,30 +239,10 @@ export class StockMonitor {
           if (el && !el.disabled) return { inStock: true, reason: id };
         }
 
-        // Debug: dump every visible button's text + data attributes so we
-        // can identify the right selector if nothing matched above.
-        const allButtons = Array.from(document.querySelectorAll('button')).map(btn => ({
-          text: (btn.textContent ?? '').trim().slice(0, 60),
-          disabled: (btn as HTMLButtonElement).disabled,
-          automationId: btn.getAttribute('data-automation-id') ?? '',
-          testId: btn.getAttribute('data-testid') ?? '',
-          ariaLabel: btn.getAttribute('aria-label') ?? '',
-          cls: btn.className.slice(0, 80),
-        }));
-        return { inStock: false, reason: 'no-atc-found', allButtons };
+        return { inStock: false, reason: 'no-atc-found' };
       });
 
       this.callbacks.onLog('info', `Walmart check: ${result.inStock ? 'IN STOCK' : 'out of stock'} (${result.reason})`);
-
-      if (!result.inStock && result.reason === 'no-atc-found' && result.allButtons?.length) {
-        const dump = result.allButtons
-          .filter((b: { text: string }) => b.text.length > 0)
-          .map((b: { text: string; disabled: boolean; automationId: string; testId: string; ariaLabel: string }) =>
-            `  [${b.disabled ? 'DISABLED' : 'enabled'}] "${b.text}" | auto="${b.automationId}" testid="${b.testId}" aria="${b.ariaLabel}"`)
-          .join('\n');
-        this.callbacks.onLog('warn', `No ATC button found. All buttons on page:\n${dump}`);
-      }
-
       return result.inStock;
     } catch (err) {
       this.callbacks.onLog('warn', `Walmart check error: ${(err as Error).message}`);
