@@ -1,0 +1,38 @@
+appId: com.personal.retailcheckoutbot
+productName: Retail Checkout Bot
+copyright: "Personal use only"
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist/**/*
+  - "!**/*.map"
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.productivity
+  darkModeSupport: true
+
+dmg:
+  title: "${productName} ${version}"
+  contents:
+    - x: 410
+      y: 150
+      type: link
+      path: /Applications
+    - x: 130
+      y: 150
+      type: file
+
+asar: true
+asarUnpack:
+  - "node_modules/better-sqlite3/**/*"
+  - "node_modules/playwright/**/*"
+
+nativeRebuilder: sequential
